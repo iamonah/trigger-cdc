@@ -5,31 +5,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/iamonah/cdc/internal/cdc"
 	"github.com/iamonah/cdc/internal/config"
+	"github.com/iamonah/cdc/internal/logging"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog"
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	log := logging.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, config.Load()); err != nil {
-		slog.Error("listener stopped", "err", err)
+	if err := run(ctx, log, config.Load()); err != nil {
+		log.Error().Err(err).Msg("listener stopped")
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, cfg config.Config) error {
+func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
 	// LISTEN is connection-scoped, so the listener needs one dedicated
 	// connection. A pgxpool would hand out different connections per query.
 	conn, err := pgx.Connect(ctx, cfg.DatabaseURL)
@@ -43,44 +44,43 @@ func run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("listen on %q: %w", cfg.Channel, err)
 	}
 
-	slog.Info("listening for changes", "channel", cfg.Channel)
+	log.Info().Str("channel", cfg.Channel).Msg("listening for changes")
 
 	for {
 		notification, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				slog.Info("listener shutting down")
+				log.Info().Msg("listener shutting down")
 				return nil
 			}
 
 			return fmt.Errorf("wait for notification: %w", err)
 		}
 
-		handle(notification)
+		handle(log, notification)
 	}
 }
 
-func handle(notification *pgconn.Notification) {
+func handle(log zerolog.Logger, notification *pgconn.Notification) {
 	var change cdc.Change
 	if err := json.Unmarshal([]byte(notification.Payload), &change); err != nil {
-		slog.Warn("could not decode notification",
-			"payload", notification.Payload,
-			"err", err,
-		)
+		log.Warn().
+			Str("payload", notification.Payload).
+			Err(err).
+			Msg("could not decode notification")
 		return
 	}
 
-	attrs := []any{
-		"action", change.Action,
-		"table", change.Table,
-		"id", change.ID,
-		"row", string(change.Data),
-		"timestamp", change.Timestamp,
-	}
+	event := log.Info().
+		Str("action", string(change.Action)).
+		Str("table", change.Table).
+		Int64("id", change.ID).
+		RawJSON("row", change.Data).
+		Time("timestamp", change.Timestamp)
 
 	if len(change.Old) > 0 && string(change.Old) != "null" {
-		attrs = append(attrs, "old", string(change.Old))
+		event = event.RawJSON("old", change.Old)
 	}
 
-	slog.Info("change received", attrs...)
+	event.Msg("change received")
 }

@@ -53,7 +53,8 @@ The writer inserts a random user every two seconds. The listener prints
 something like:
 
 ```
-level=INFO msg="change received" action=INSERT table=users id=1 row={"id": 1, "name": "Ada Lovelace", "email": "ada.lovelace.1762...@example.com", "created_at": "...", "updated_at": "..."} timestamp=...
+2026-11-05T00:48:19+01:00 INF listening for changes channel=users_changes
+2026-11-05T00:48:19+01:00 INF change received action=INSERT id=1 row={"created_at":"...","email":"ada...@example.com","id":1,"name":"Ada Lovelace","updated_at":"..."} table=users timestamp=...
 ```
 
 Try updates and deletes by hand:
@@ -189,11 +190,19 @@ replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
 │   ├── cdc/             # JSON event type
 │   ├── config/          # env/.env loading
 │   ├── db/              # pgxpool setup
+│   ├── logging/         # zerolog console logger
 │   └── store/           # users queries
 ├── migrations/          # tern migrations (up + down in one file)
 ├── docker-compose.yml
 └── Makefile
 ```
+
+## Logging
+
+Both commands use [zerolog](https://github.com/rs/zerolog) through
+`internal/logging`. Logs are written with a `ConsoleWriter` so they stay
+readable in a terminal; colours are turned off automatically when stdout is
+not a terminal (for example when redirecting to a file).
 
 ## Troubleshooting
 

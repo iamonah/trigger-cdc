@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"math/rand/v2"
 	"os"
 	"os/signal"
@@ -15,11 +14,14 @@ import (
 
 	"github.com/iamonah/cdc/internal/config"
 	"github.com/iamonah/cdc/internal/db"
+	"github.com/iamonah/cdc/internal/logging"
 	"github.com/iamonah/cdc/internal/store"
+
+	"github.com/rs/zerolog"
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	log := logging.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -28,7 +30,7 @@ func main() {
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("could not connect to postgres", "err", err)
+		log.Error().Err(err).Msg("could not connect to postgres")
 		os.Exit(1)
 	}
 	defer pool.Close()
@@ -45,13 +47,13 @@ func main() {
 
 	switch command {
 	case "loop":
-		runErr = runLoop(ctx, users, args)
+		runErr = runLoop(ctx, log, users, args)
 	case "create":
-		runErr = runCreate(ctx, users, args)
+		runErr = runCreate(ctx, log, users, args)
 	case "update":
-		runErr = runUpdate(ctx, users, args)
+		runErr = runUpdate(ctx, log, users, args)
 	case "delete":
-		runErr = runDelete(ctx, users, args)
+		runErr = runDelete(ctx, log, users, args)
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -61,13 +63,13 @@ func main() {
 	}
 
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		slog.Error("writer stopped", "err", runErr)
+		log.Error().Err(runErr).Msg("writer stopped")
 		os.Exit(1)
 	}
 }
 
 // runLoop is the default command: insert a random user on every tick.
-func runLoop(ctx context.Context, users *store.Users, args []string) error {
+func runLoop(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("loop", flag.ExitOnError)
 	interval := fs.Duration("interval", 2*time.Second, "delay between inserts")
 	fs.Parse(args)
@@ -76,7 +78,7 @@ func runLoop(ctx context.Context, users *store.Users, args []string) error {
 		return errors.New("loop: -interval must be positive")
 	}
 
-	slog.Info("writing users", "interval", *interval, "stop", "ctrl+c")
+	log.Info().Dur("interval", *interval).Msg("writing users")
 
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
@@ -87,9 +89,13 @@ func runLoop(ctx context.Context, users *store.Users, args []string) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			slog.Error("could not create user", "err", err)
+			log.Error().Err(err).Msg("could not create user")
 		} else {
-			slog.Info("user created", "id", user.ID, "name", user.Name, "email", user.Email)
+			log.Info().
+				Int64("id", user.ID).
+				Str("name", user.Name).
+				Str("email", user.Email).
+				Msg("user created")
 		}
 
 		select {
@@ -100,7 +106,7 @@ func runLoop(ctx context.Context, users *store.Users, args []string) error {
 	}
 }
 
-func runCreate(ctx context.Context, users *store.Users, args []string) error {
+func runCreate(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 	name := fs.String("name", randomName(), "name for the new user")
 	email := fs.String("email", "", "email for the new user (default: generated)")
@@ -115,11 +121,16 @@ func runCreate(ctx context.Context, users *store.Users, args []string) error {
 		return err
 	}
 
-	slog.Info("user created", "id", user.ID, "name", user.Name, "email", user.Email)
+	log.Info().
+		Int64("id", user.ID).
+		Str("name", user.Name).
+		Str("email", user.Email).
+		Msg("user created")
+
 	return nil
 }
 
-func runUpdate(ctx context.Context, users *store.Users, args []string) error {
+func runUpdate(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	id := fs.Int64("id", 0, "id of the user to update (required)")
 	name := fs.String("name", "", "new name")
@@ -138,11 +149,16 @@ func runUpdate(ctx context.Context, users *store.Users, args []string) error {
 		return err
 	}
 
-	slog.Info("user updated", "id", user.ID, "name", user.Name, "email", user.Email)
+	log.Info().
+		Int64("id", user.ID).
+		Str("name", user.Name).
+		Str("email", user.Email).
+		Msg("user updated")
+
 	return nil
 }
 
-func runDelete(ctx context.Context, users *store.Users, args []string) error {
+func runDelete(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	id := fs.Int64("id", 0, "id of the user to delete (required)")
 	fs.Parse(args)
@@ -155,7 +171,7 @@ func runDelete(ctx context.Context, users *store.Users, args []string) error {
 		return err
 	}
 
-	slog.Info("user deleted", "id", *id)
+	log.Info().Int64("id", *id).Msg("user deleted")
 	return nil
 }
 
