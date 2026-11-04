@@ -1,0 +1,9 @@
+# local environment
+.env
+
+# binaries
+bin/
+*.exe
+
+# logs
+*.log

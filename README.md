@@ -1,0 +1,182 @@
+# CDC with Go, Postgres, and LISTEN/NOTIFY
+
+A small, hands-on change data capture (CDC) experiment based on
+[Change Data Capture with Go and PostgreSQL (listen/notify)](https://www.youtube.com/watch?v=bnFkUp-jYiA).
+
+The flow is:
+
+```
+INSERT / UPDATE / DELETE on users
+              │
+              ▼
+   users_notify_changes trigger
+              │
+              ▼
+   pg_notify('users_changes', json)
+              │
+              ▼
+   cmd/listener  ──►  logs the change event
+```
+
+- `cmd/writer` writes to the `users` table.
+- Postgres triggers publish a JSON event for every row change.
+- `cmd/listener` holds one connection open and listens for those events.
+
+## Requirements
+
+- Go 1.25+
+- Docker (or your own Postgres 16+)
+- [golang-migrate](https://github.com/golang-migrate/migrate) (`migrate` on your `PATH`)
+
+## Quick start
+
+```bash
+cp .env.example .env
+make up            # start Postgres on localhost:5433
+make migrate-up    # create the users table, trigger, and function
+```
+
+In two separate terminals:
+
+```bash
+# terminal 1
+make run-listener
+```
+
+```bash
+# terminal 2
+make run-writer
+```
+
+The writer inserts a random user every two seconds. The listener prints
+something like:
+
+```
+level=INFO msg="change received" action=INSERT table=users id=1 row={"id": 1, "name": "Ada Lovelace", "email": "ada.lovelace.1762...@example.com", "created_at": "...", "updated_at": "..."} timestamp=...
+```
+
+Try updates and deletes by hand:
+
+```bash
+make run-writer ARGS='update -id 1 -name "Ada L."'
+make run-writer ARGS='delete -id 1'
+```
+
+Or from `psql` (`make psql`):
+
+```sql
+INSERT INTO users (name, email) VALUES ('Grace Hopper', 'grace@example.com');
+UPDATE users SET name = 'Rear Admiral Grace Hopper' WHERE email = 'grace@example.com';
+DELETE FROM users WHERE email = 'grace@example.com';
+```
+
+## Useful commands
+
+| Command | What it does |
+| --- | --- |
+| `make up` / `make down` | Start / stop Postgres |
+| `make logs` | Follow Postgres logs |
+| `make psql` | Open a psql session |
+| `make migrate-up` | Apply migrations |
+| `make migrate-down` | Roll back the last migration |
+| `make migrate-version` | Show the current migration version |
+| `make migrate-create name=add_widgets` | Create a new up/down migration pair |
+| `make run-listener` | Run the listener |
+| `make run-writer` | Run the writer loop |
+| `make build` | Build both binaries into `./bin` |
+| `make reset` | Delete the database volume |
+
+Writer commands:
+
+```bash
+go run ./cmd/writer                                   # insert random users forever
+go run ./cmd/writer -interval 500ms                   # faster inserts
+go run ./cmd/writer create -name "Ada" -email ada@example.com
+go run ./cmd/writer update -id 1 -name "Ada L."       # -name and/or -email
+go run ./cmd/writer delete -id 1
+```
+
+## How it works
+
+### 1. The table
+
+`migrations/000001_create_users.up.sql` creates a normal `users` table.
+
+### 2. The trigger
+
+`migrations/000002_create_users_notify_trigger.up.sql` installs a function
+and an `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` trigger. The
+function builds one JSON payload per changed row and calls:
+
+```sql
+PERFORM pg_notify('users_changes', payload::text);
+```
+
+Payload shape:
+
+```json
+{
+  "action": "INSERT | UPDATE | DELETE",
+  "table": "users",
+  "id": 1,
+  "data": { "...the new row (or old row for DELETE)..." },
+  "old": { "...the previous row, only on UPDATE/DELETE..." },
+  "timestamp": "2026-11-05T12:34:56.789+00:00"
+}
+```
+
+### 3. The listener
+
+The listener uses a **dedicated** `pgx.Conn`, not a pool, because `LISTEN` is
+scoped to a single connection. It runs `LISTEN users_changes` once and then
+blocks in `WaitForNotification`, decoding and logging each payload.
+
+## Things to know about LISTEN/NOTIFY
+
+This is the simplest way to experiment with CDC, but it has important limits:
+
+- **At-most-once delivery.** Notifications only reach sessions that are
+  already listening. Missed messages are gone forever; there is no replay.
+- **Payload size.** A notification must fit in roughly 8000 bytes. Wide rows
+  need a payload with only the `id`; the listener can then fetch the row.
+- **Ephemeral on disconnect.** If the listener's connection drops, events
+  published while it is away are lost.
+- **No history.** Unlike an audit table or logical replication, there is no
+  log of past changes.
+- **Transaction visibility.** Notifications are delivered when the
+  transaction commits. A rolled-back change never reaches listeners.
+
+For prototyping, cache invalidation, or waking up a poller, this is a great
+fit. For guaranteed delivery, use an audit/outbox table or logical
+replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
+
+## Project layout
+
+```
+.
+├── cmd/
+│   ├── listener/        # LISTEN + WaitForNotification loop
+│   └── writer/          # inserts/updates/deletes users
+├── internal/
+│   ├── cdc/             # JSON event type
+│   ├── config/          # env/.env loading
+│   ├── db/              # pgxpool setup
+│   └── store/           # users queries
+├── migrations/          # golang-migrate up/down files
+├── docker-compose.yml
+└── Makefile
+```
+
+## Troubleshooting
+
+**The listener prints nothing.** Check that migrations ran
+(`make migrate-version`), that the listener is connected to the same database,
+and that `CDC_CHANNEL` matches the channel in the trigger
+(`users_changes`).
+
+**`make up` cannot connect to Docker.** Make sure Docker is running. If you
+have more than one Docker context, `docker context use default` or run
+`docker compose` with the right context.
+
+**Port already in use.** Change `5433:5432` in `docker-compose.yml` and update
+`DATABASE_URL` in `.env`.
