@@ -5,12 +5,13 @@ SHELL := /bin/bash
 DATABASE_URL ?= postgres://cdc:cdc@localhost:5433/cdc?sslmode=disable
 CDC_CHANNEL  ?= users_changes
 MIGRATIONS   := ./migrations
+TERN         ?= tern
 ARGS         ?=
 
 export DATABASE_URL
 export CDC_CHANNEL
 
-.PHONY: help up down logs psql migrate-up migrate-down migrate-version migrate-create \
+.PHONY: help up down logs psql migrate-up migrate-down migrate-status migrate-create \
         run-listener run-writer build fmt vet tidy reset
 
 help: ## Show this help
@@ -30,17 +31,17 @@ psql: ## Open a psql session
 	psql "$(DATABASE_URL)"
 
 migrate-up: ## Apply all migrations
-	migrate -path $(MIGRATIONS) -database "$(DATABASE_URL)" up
+	$(TERN) migrate --migrations $(MIGRATIONS) --conn-string "$(DATABASE_URL)"
 
 migrate-down: ## Roll back the last migration
-	migrate -path $(MIGRATIONS) -database "$(DATABASE_URL)" down 1
+	$(TERN) migrate --migrations $(MIGRATIONS) --conn-string "$(DATABASE_URL)" --destination -1
 
-migrate-version: ## Show the current migration version
-	migrate -path $(MIGRATIONS) -database "$(DATABASE_URL)" version
+migrate-status: ## Show migration status
+	$(TERN) status --migrations $(MIGRATIONS) --conn-string "$(DATABASE_URL)"
 
 migrate-create: ## Create a new migration (make migrate-create name=add_widgets)
 	@test -n "$(name)" || (echo "usage: make migrate-create name=add_widgets" && exit 1)
-	migrate create -ext sql -dir $(MIGRATIONS) -seq $(name)
+	$(TERN) new --migrations $(MIGRATIONS) $(name)
 
 run-listener: ## Run the CDC listener
 	go run ./cmd/listener

@@ -26,7 +26,8 @@ INSERT / UPDATE / DELETE on users
 
 - Go 1.25+
 - Docker (or your own Postgres 16+)
-- [golang-migrate](https://github.com/golang-migrate/migrate) (`migrate` on your `PATH`)
+- [tern](https://github.com/jackc/tern) v2 (`tern` on your `PATH`):
+  `go install github.com/jackc/tern/v2@latest`
 
 ## Quick start
 
@@ -79,8 +80,8 @@ DELETE FROM users WHERE email = 'grace@example.com';
 | `make psql` | Open a psql session |
 | `make migrate-up` | Apply migrations |
 | `make migrate-down` | Roll back the last migration |
-| `make migrate-version` | Show the current migration version |
-| `make migrate-create name=add_widgets` | Create a new up/down migration pair |
+| `make migrate-status` | Show the current migration status |
+| `make migrate-create name=add_widgets` | Create a new migration |
 | `make run-listener` | Run the listener |
 | `make run-writer` | Run the writer loop |
 | `make build` | Build both binaries into `./bin` |
@@ -96,15 +97,42 @@ go run ./cmd/writer update -id 1 -name "Ada L."       # -name and/or -email
 go run ./cmd/writer delete -id 1
 ```
 
+## Migrations (tern)
+
+Migrations live in `migrations/` and follow tern's naming convention:
+`NNN_description.sql`. Each file contains the up statements, a separator, and
+the down statements:
+
+```sql
+CREATE TABLE widgets (...);
+
+---- create above / drop below ----
+
+DROP TABLE widgets;
+```
+
+Tern records the applied version in `public.schema_version`. Create a new
+migration with `make migrate-create name=add_widgets`, apply it with
+`make migrate-up`, and roll it back with `make migrate-down` (which runs
+`tern migrate --destination -1`).
+
+The raw tern commands are also available:
+
+```bash
+tern migrate --migrations ./migrations --conn-string "$DATABASE_URL"
+tern migrate --migrations ./migrations --conn-string "$DATABASE_URL" --destination -1
+tern status  --migrations ./migrations --conn-string "$DATABASE_URL"
+```
+
 ## How it works
 
 ### 1. The table
 
-`migrations/000001_create_users.up.sql` creates a normal `users` table.
+`migrations/001_create_users.sql` creates a normal `users` table.
 
 ### 2. The trigger
 
-`migrations/000002_create_users_notify_trigger.up.sql` installs a function
+`migrations/002_create_users_notify_trigger.sql` installs a function
 and an `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` trigger. The
 function builds one JSON payload per changed row and calls:
 
@@ -162,7 +190,7 @@ replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
 │   ├── config/          # env/.env loading
 │   ├── db/              # pgxpool setup
 │   └── store/           # users queries
-├── migrations/          # golang-migrate up/down files
+├── migrations/          # tern migrations (up + down in one file)
 ├── docker-compose.yml
 └── Makefile
 ```
@@ -170,7 +198,7 @@ replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
 ## Troubleshooting
 
 **The listener prints nothing.** Check that migrations ran
-(`make migrate-version`), that the listener is connected to the same database,
+(`make migrate-status`), that the listener is connected to the same database,
 and that `CDC_CHANNEL` matches the channel in the trigger
 (`users_changes`).
 

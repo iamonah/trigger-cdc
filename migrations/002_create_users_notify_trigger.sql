@@ -54,3 +54,8 @@ CREATE TRIGGER users_notify_changes
 AFTER INSERT OR UPDATE OR DELETE ON users
 FOR EACH ROW
 EXECUTE FUNCTION notify_users_changes();
+
+---- create above / drop below ----
+
+DROP TRIGGER IF EXISTS users_notify_changes ON users;
+DROP FUNCTION IF EXISTS notify_users_changes();
