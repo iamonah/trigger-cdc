@@ -1,9 +1,13 @@
-# CDC with Go, Postgres, and LISTEN/NOTIFY
+# CDC with Go and Postgres
 
-A small, hands-on change data capture (CDC) experiment based on
-[Change Data Capture with Go and PostgreSQL (listen/notify)](https://www.youtube.com/watch?v=bnFkUp-jYiA).
+Two change data capture (CDC) experiments side by side:
 
-The flow is:
+1. **LISTEN/NOTIFY** — trigger-based CDC, based on
+   [Change Data Capture with Go and PostgreSQL (listen/notify)](https://www.youtube.com/watch?v=bnFkUp-jYiA).
+2. **Logical replication** — WAL-based CDC using
+   [pglogrepl](https://github.com/jackc/pglogrepl).
+
+The LISTEN/NOTIFY flow is:
 
 ```
 INSERT / UPDATE / DELETE on users
@@ -18,9 +22,27 @@ INSERT / UPDATE / DELETE on users
    cmd/listener  ──►  logs the change event
 ```
 
+The logical replication flow is:
+
+```
+INSERT / UPDATE / DELETE on users
+              │
+              ▼
+        Postgres WAL
+              │
+              ▼
+   users_publication (publication)
+              │
+              ▼
+   users_slot (replication slot)
+              │
+              ▼
+   cmd/replicator (pglogrepl)  ──►  logs the change event
+```
+
 - `cmd/writer` writes to the `users` table.
-- Postgres triggers publish a JSON event for every row change.
-- `cmd/listener` holds one connection open and listens for those events.
+- `cmd/listener` consumes trigger notifications from `users_changes`.
+- `cmd/replicator` consumes WAL changes through a logical replication slot.
 
 ## Requirements
 
@@ -34,7 +56,7 @@ INSERT / UPDATE / DELETE on users
 ```bash
 cp .env.example .env
 make up            # start Postgres on localhost:5433
-make migrate-up    # create the users table, trigger, and function
+make migrate-up    # create the users table, trigger, publication, etc.
 ```
 
 In two separate terminals:
@@ -72,6 +94,59 @@ UPDATE users SET name = 'Rear Admiral Grace Hopper' WHERE email = 'grace@example
 DELETE FROM users WHERE email = 'grace@example.com';
 ```
 
+## Logical replication with pglogrepl
+
+The same `users` table is also published for logical replication. Compared to
+LISTEN/NOTIFY, this reads Postgres' WAL instead of relying on a trigger.
+
+`docker-compose.yml` starts Postgres with `wal_level=logical`, and
+`migrations/003_create_users_publication.sql` adds:
+
+```sql
+CREATE PUBLICATION users_publication FOR TABLE users;
+ALTER TABLE users REPLICA IDENTITY FULL;
+```
+
+`REPLICA IDENTITY FULL` makes UPDATE/DELETE messages include the complete old
+row, not just the primary key.
+
+Run the replicator instead of (or alongside) the listener:
+
+```bash
+# terminal 1
+make run-replicator
+```
+
+```bash
+# terminal 2
+make run-writer
+```
+
+Expected output:
+
+```
+2026-11-05T01:08:53+01:00 INF created replication slot consistent_point=0/1BE33D0 plugin=pgoutput slot=users_slot
+2026-11-05T01:08:53+01:00 INF replicating changes lsn=0/1BE33D0 publication=users_publication slot=users_slot
+2026-11-05T01:08:55+01:00 INF change received action=INSERT id=1 lsn=0/1BE3438 row={"created_at":"...","email":"...","id":1,"name":"Logical Test","updated_at":"..."} table=users timestamp=... xid=758
+```
+
+The replicator creates a **persistent slot** (`users_slot`) on first run and
+resumes from its confirmed LSN after a restart. Useful commands:
+
+```bash
+make replica-status   # slot state + retained WAL
+make replica-clean    # drop the slot
+```
+
+A slot retains WAL until the consumer acknowledges it. For a long-running
+setup, monitor `make replica-status` and set `max_slot_wal_keep_size` so an
+abandoned slot cannot fill the disk. `make reset` deletes the volume and the
+slot with it.
+
+> If you previously ran an older version of this repo, run `make reset` once
+> so the container is recreated with `wal_level=logical` and the replication
+> `pg_hba.conf` entry. Init scripts only run on a fresh data volume.
+
 ## Useful commands
 
 | Command | What it does |
@@ -83,9 +158,12 @@ DELETE FROM users WHERE email = 'grace@example.com';
 | `make migrate-down` | Roll back the last migration |
 | `make migrate-status` | Show the current migration status |
 | `make migrate-create name=add_widgets` | Create a new migration |
-| `make run-listener` | Run the listener |
+| `make run-listener` | Run the LISTEN/NOTIFY listener |
+| `make run-replicator` | Run the logical replication consumer |
 | `make run-writer` | Run the writer loop |
-| `make build` | Build both binaries into `./bin` |
+| `make replica-status` | Show replication slot status and retained WAL |
+| `make replica-clean` | Drop the replication slot |
+| `make build` | Build all binaries into `./bin` |
 | `make reset` | Delete the database volume |
 
 Writer commands:
@@ -125,7 +203,7 @@ tern migrate --migrations ./migrations --conn-string "$DATABASE_URL" --destinati
 tern status  --migrations ./migrations --conn-string "$DATABASE_URL"
 ```
 
-## How it works
+## How it works: LISTEN/NOTIFY
 
 ### 1. The table
 
@@ -160,6 +238,46 @@ The listener uses a **dedicated** `pgx.Conn`, not a pool, because `LISTEN` is
 scoped to a single connection. It runs `LISTEN users_changes` once and then
 blocks in `WaitForNotification`, decoding and logging each payload.
 
+## How it works: logical replication
+
+### 1. Publication and replica identity
+
+`migrations/003_create_users_publication.sql` creates a publication for the
+`users` table and sets `REPLICA IDENTITY FULL`. The replicator asks Postgres
+to stream that publication with the built-in `pgoutput` output plugin.
+
+### 2. The replicator
+
+`cmd/replicator` opens a normal `pgx` connection for catalog checks and a
+second `pgconn` connection with `replication=database` for streaming. It:
+
+1. Checks that `users_publication` exists.
+2. Creates the `users_slot` logical replication slot if needed, or resumes
+   from its `confirmed_flush_lsn`.
+3. Runs `START_REPLICATION` with `proto_version '1'` and
+   `publication_names 'users_publication'`.
+4. Decodes `pgoutput` messages (`Relation`, `Begin`, `Insert`, `Update`,
+   `Delete`, `Commit`) into the same event shape as the trigger payload.
+5. Sends `StandbyStatusUpdate` messages to acknowledge processed WAL.
+
+Because the slot persists, events are not lost while the replicator is
+offline (until the slot's retained WAL is removed).
+
+## Which approach should I use?
+
+| | LISTEN/NOTIFY | Logical replication |
+| --- | --- | --- |
+| Capture source | Trigger per row | WAL stream |
+| Delivery | At-most-once | At-least-once with LSN tracking |
+| Replay after disconnect | No | Yes, via the slot |
+| Setup | Trigger + listener | `wal_level=logical`, publication, slot |
+| Payload limit | ~8 KB | No NOTIFY limit; streamed from WAL |
+| Go dependency | `pgx` | `pglogrepl` + `pgx` |
+| Complexity | Low | Medium/high |
+
+Use LISTEN/NOTIFY for prototyping, cache invalidation, or waking up a poller.
+Use logical replication when changes must not be missed.
+
 ## Things to know about LISTEN/NOTIFY
 
 This is the simplest way to experiment with CDC, but it has important limits:
@@ -185,7 +303,10 @@ replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
 .
 ├── cmd/
 │   ├── listener/        # LISTEN + WaitForNotification loop
+│   ├── replicator/      # pglogrepl WAL consumer
 │   └── writer/          # inserts/updates/deletes users
+├── docker/
+│   └── init/            # pg_hba rule for replication connections
 ├── internal/
 │   ├── cdc/             # JSON event type
 │   ├── config/          # env/.env loading
@@ -199,7 +320,7 @@ replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
 
 ## Logging
 
-Both commands use [zerolog](https://github.com/rs/zerolog) through
+All commands use [zerolog](https://github.com/rs/zerolog) through
 `internal/logging`. Logs are written with a `ConsoleWriter` so they stay
 readable in a terminal; colours are turned off automatically when stdout is
 not a terminal (for example when redirecting to a file).
@@ -210,6 +331,17 @@ not a terminal (for example when redirecting to a file).
 (`make migrate-status`), that the listener is connected to the same database,
 and that `CDC_CHANNEL` matches the channel in the trigger
 (`users_changes`).
+
+**The replicator fails with `no pg_hba.conf entry for replication connection`.**
+The init script that permits replication connections only runs when the data
+volume is first created. Recreate it with `make reset && make up &&
+make migrate-up`.
+
+**The replicator says the publication does not exist.** Apply migrations with
+`make migrate-up`; `003_create_users_publication.sql` creates it.
+
+**The replication slot is retaining WAL.** Check it with `make replica-status`
+and remove it with `make replica-clean` when you are done experimenting.
 
 **`make up` cannot connect to Docker.** Make sure Docker is running. If you
 have more than one Docker context, `docker context use default` or run

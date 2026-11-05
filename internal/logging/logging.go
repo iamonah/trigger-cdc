@@ -19,5 +19,5 @@ func New() zerolog.Logger {
 		out.NoColor = true
 	}
 
-	return zerolog.New(out).With().Timestamp().Logger()
+	return zerolog.New(out).Level(zerolog.InfoLevel).With().Timestamp().Logger()
 }
