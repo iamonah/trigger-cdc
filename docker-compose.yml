@@ -6,24 +6,11 @@ services:
       POSTGRES_USER: cdc
       POSTGRES_PASSWORD: cdc
       POSTGRES_DB: cdc
-    # Logical replication requires wal_level=logical. The other settings are
-    # explicit here for clarity; both already default to 10.
-    command:
-      - postgres
-      - -c
-      - wal_level=logical
-      - -c
-      - max_replication_slots=10
-      - -c
-      - max_wal_senders=10
     ports:
       - "5433:5432"
     volumes:
       # Postgres 18 keeps PGDATA inside /var/lib/postgresql/18/docker.
       - cdc_pgdata:/var/lib/postgresql
-      # Adds a pg_hba rule for replication connections. Init scripts only run
-      # when the data volume is first created.
-      - ./docker/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cdc -d cdc"]
       interval: 2s

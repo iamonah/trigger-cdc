@@ -5,6 +5,8 @@
 -- Keep the payload under Postgres' ~8000 byte NOTIFY limit. For wide rows,
 -- send only the id (and maybe changed columns) and let the listener fetch
 -- the row by id instead.
+
+-- define the trigger function to send notifications on row changes
 CREATE OR REPLACE FUNCTION notify_users_changes()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -50,6 +52,7 @@ BEGIN
 END;
 $$;
 
+-- create the trigger to call the function on row changes or bind the trigger to the users table
 CREATE TRIGGER users_notify_changes
 AFTER INSERT OR UPDATE OR DELETE ON users
 FOR EACH ROW
