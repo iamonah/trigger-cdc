@@ -55,10 +55,12 @@ For a detailed tour of the Go code and SQL, see
 ## Quick start
 
 ```bash
-cp .env.example .env
 make up            # start Postgres on localhost:5433
 make migrate-up    # create the users table, trigger, and function
 ```
+
+The defaults connect to `postgres://cdc:cdc@localhost:5433/cdc`. Override
+`DATABASE_URL` or `CDC_CHANNEL` in your environment if needed.
 
 In two separate terminals:
 
@@ -240,4 +242,4 @@ have more than one Docker context, `docker context use default` or run
 `docker compose` with the right context.
 
 **Port already in use.** Change `5433:5432` in `docker-compose.yml` and update
-`DATABASE_URL` in `.env`.
+`DATABASE_URL`.

@@ -27,7 +27,7 @@ BEGIN
         row_data := to_jsonb(NEW);
     END IF;
 
-    row_id := (row_data ->> 'id')::bigint;
+    row_id := (row_data ->> 'id')::bigint; --assuming all rows id are bigint convertible
 
     payload := jsonb_build_object(
         'action', TG_OP,
