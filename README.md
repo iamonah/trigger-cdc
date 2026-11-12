@@ -3,6 +3,13 @@
 A small, hands-on change data capture (CDC) experiment based on
 [Change Data Capture with Go and PostgreSQL (listen/notify)](https://www.youtube.com/watch?v=bnFkUp-jYiA).
 
+## What is CDC?
+
+Change data capture is a way to observe inserts, updates, and deletes as they
+happen, instead of polling a table for differences. This project uses a
+Postgres trigger to publish each row change as JSON, and a Go process that
+listens for those notifications in real time.
+
 The flow is:
 
 ```
@@ -24,6 +31,19 @@ INSERT / UPDATE / DELETE on users
 
 For a detailed tour of the Go code and SQL, see
 [docs/code-walkthrough.md](docs/code-walkthrough.md).
+
+## Contents
+
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Useful commands](#useful-commands)
+- [Migrations (tern)](#migrations-tern)
+- [How it works](#how-it-works)
+- [LISTEN/NOTIFY caveats](#things-to-know-about-listennotify)
+- [Project layout](#project-layout)
+- [Logging](#logging)
+- [Troubleshooting](#troubleshooting)
+- [Code walkthrough](docs/code-walkthrough.md)
 
 ## Requirements
 
