@@ -1,3 +1,4 @@
+// Package logging builds the application's zerolog logger.
 package logging
 
 import (

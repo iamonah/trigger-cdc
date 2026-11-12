@@ -1,3 +1,4 @@
+// Package cdc defines the change event published by the users trigger.
 package cdc
 
 import (
@@ -9,8 +10,11 @@ import (
 type Action string
 
 const (
+	// ActionInsert is emitted for a new row.
 	ActionInsert Action = "INSERT"
+	// ActionUpdate is emitted when a row changes.
 	ActionUpdate Action = "UPDATE"
+	// ActionDelete is emitted when a row is removed.
 	ActionDelete Action = "DELETE"
 )
 

@@ -20,6 +20,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// main configures logging and signal handling, then dispatches to the writer
+// command selected on the command line.
 func main() {
 	log := logging.New()
 
@@ -106,6 +108,7 @@ func runLoop(ctx context.Context, log zerolog.Logger, users *store.Users, args [
 	}
 }
 
+// runCreate inserts a single user.
 func runCreate(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 	name := fs.String("name", randomName(), "name for the new user")
@@ -130,6 +133,7 @@ func runCreate(ctx context.Context, log zerolog.Logger, users *store.Users, args
 	return nil
 }
 
+// runUpdate updates the supplied fields on one user.
 func runUpdate(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	id := fs.Int64("id", 0, "id of the user to update (required)")
@@ -158,6 +162,7 @@ func runUpdate(ctx context.Context, log zerolog.Logger, users *store.Users, args
 	return nil
 }
 
+// runDelete deletes one user by id.
 func runDelete(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	id := fs.Int64("id", 0, "id of the user to delete (required)")
@@ -184,15 +189,18 @@ var names = []string{
 	"Margaret Hamilton",
 }
 
+// randomName returns one of the demo names.
 func randomName() string {
 	return names[rand.IntN(len(names))]
 }
 
+// randomEmail builds a unique demo email address.
 func randomEmail() string {
 	local := strings.ToLower(strings.ReplaceAll(randomName(), " ", "."))
 	return fmt.Sprintf("%s.%d@example.com", local, time.Now().UnixNano())
 }
 
+// usage prints the writer command reference to stderr.
 func usage() {
 	fmt.Fprint(os.Stderr, `Usage: writer [command] [flags]
 

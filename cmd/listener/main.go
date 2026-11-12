@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// main configures logging and signal handling, then runs the listener.
 func main() {
 	log := logging.New()
 
@@ -30,6 +31,8 @@ func main() {
 	}
 }
 
+// run opens a dedicated connection, subscribes to the configured channel, and
+// blocks until the context is cancelled or the connection fails.
 func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
 	// LISTEN is connection-scoped, so the listener needs one dedicated
 	// connection. A pgxpool would hand out different connections per query.
@@ -61,6 +64,8 @@ func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
 	}
 }
 
+// handle decodes one notification payload and logs it. Malformed payloads are
+// logged and skipped so one bad event does not stop the listener.
 func handle(log zerolog.Logger, notification *pgconn.Notification) {
 	var change cdc.Change
 	if err := json.Unmarshal([]byte(notification.Payload), &change); err != nil {

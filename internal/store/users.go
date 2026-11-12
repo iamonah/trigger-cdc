@@ -1,3 +1,4 @@
+// Package store contains PostgreSQL queries for application tables.
 package store
 
 import (
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// User is a row from the users table.
 type User struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
@@ -18,14 +20,17 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Users provides queries for the users table.
 type Users struct {
 	pool *pgxpool.Pool
 }
 
+// NewUsers returns a Users store backed by pool.
 func NewUsers(pool *pgxpool.Pool) *Users {
 	return &Users{pool: pool}
 }
 
+// Create inserts a user and returns the stored row.
 func (u *Users) Create(ctx context.Context, name, email string) (User, error) {
 	const query = `
 		INSERT INTO users (name, email)
@@ -54,6 +59,7 @@ func (u *Users) Update(ctx context.Context, id int64, name, email string) (User,
 	return user, err
 }
 
+// Delete removes a user and reports an error when the id does not exist.
 func (u *Users) Delete(ctx context.Context, id int64) error {
 	tag, err := u.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -67,6 +73,7 @@ func (u *Users) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// scanUser reads a user from a single-row query.
 func scanUser(row pgx.Row) (User, error) {
 	var user User
 

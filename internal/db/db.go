@@ -1,3 +1,4 @@
+// Package db creates and verifies Postgres connection pools.
 package db
 
 import (

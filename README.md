@@ -22,6 +22,9 @@ INSERT / UPDATE / DELETE on users
 - Postgres triggers publish a JSON event for every row change.
 - `cmd/listener` holds one connection open and listens for those events.
 
+For a detailed tour of the Go code and SQL, see
+[docs/code-walkthrough.md](docs/code-walkthrough.md).
+
 ## Requirements
 
 - Go 1.25+
@@ -186,6 +189,7 @@ replication (e.g. `wal2json`, `pgoutput`, or a tool such as Sequin).
 ├── cmd/
 │   ├── listener/        # LISTEN + WaitForNotification loop
 │   └── writer/          # inserts/updates/deletes users
+├── docs/                # detailed code walkthrough
 ├── internal/
 │   ├── cdc/             # JSON event type
 │   ├── config/          # env/.env loading
