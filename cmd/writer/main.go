@@ -65,6 +65,10 @@ func main() {
 	}
 
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		// -h prints the command's flags and is not a failure.
+		if errors.Is(runErr, flag.ErrHelp) {
+			return
+		}
 		log.Error().Err(runErr).Msg("writer stopped")
 		os.Exit(1)
 	}
@@ -72,9 +76,11 @@ func main() {
 
 // runLoop is the default command: insert a random user on every tick.
 func runLoop(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
-	fs := flag.NewFlagSet("loop", flag.ExitOnError)
+	fs := flag.NewFlagSet("loop", flag.ContinueOnError)
 	interval := fs.Duration("interval", 2*time.Second, "delay between inserts")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *interval <= 0 {
 		return errors.New("loop: -interval must be positive")
@@ -110,10 +116,12 @@ func runLoop(ctx context.Context, log zerolog.Logger, users *store.Users, args [
 
 // runCreate inserts a single user.
 func runCreate(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
-	fs := flag.NewFlagSet("create", flag.ExitOnError)
+	fs := flag.NewFlagSet("create", flag.ContinueOnError)
 	name := fs.String("name", randomName(), "name for the new user")
 	email := fs.String("email", "", "email for the new user (default: generated)")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *email == "" {
 		*email = randomEmail()
@@ -135,11 +143,13 @@ func runCreate(ctx context.Context, log zerolog.Logger, users *store.Users, args
 
 // runUpdate updates the supplied fields on one user.
 func runUpdate(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
-	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	id := fs.Int64("id", 0, "id of the user to update (required)")
 	name := fs.String("name", "", "new name")
 	email := fs.String("email", "", "new email")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *id <= 0 {
 		return errors.New("update: -id is required")
@@ -164,9 +174,11 @@ func runUpdate(ctx context.Context, log zerolog.Logger, users *store.Users, args
 
 // runDelete deletes one user by id.
 func runDelete(ctx context.Context, log zerolog.Logger, users *store.Users, args []string) error {
-	fs := flag.NewFlagSet("delete", flag.ExitOnError)
+	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
 	id := fs.Int64("id", 0, "id of the user to delete (required)")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *id <= 0 {
 		return errors.New("delete: -id is required")
