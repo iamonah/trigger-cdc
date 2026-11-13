@@ -222,8 +222,17 @@ Commands:
   update    Update a user
   delete    Delete a user
 
+Flags:
+  loop      -interval duration   delay between inserts (default 2s)
+  create    -name, -email        defaults are generated
+  update    -id, -name, -email   id required; set at least one field
+  delete    -id                  id required
+
+Run "writer <command> -h" for details.
+
 Examples:
   go run ./cmd/writer
+  go run ./cmd/writer -interval 500ms
   go run ./cmd/writer create -name "Ada Lovelace" -email ada@example.com
   go run ./cmd/writer update -id 1 -name "Ada L."
   go run ./cmd/writer delete -id 1
