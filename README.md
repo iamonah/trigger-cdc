@@ -1,10 +1,11 @@
-# CDC with Go, Postgres, and LISTEN/NOTIFY
+# Trigger-based CDC with Postgres and Go
 
-A small change data capture (CDC) experiment based on
+A small change data capture (CDC) example that uses Postgres triggers and
+`LISTEN/NOTIFY` to publish row changes and a Go service to consume them in
+real time.
+
+Inspired by
 [Change Data Capture with Go and PostgreSQL (listen/notify)](https://www.youtube.com/watch?v=bnFkUp-jYiA).
-
-A Postgres trigger publishes every row change as JSON, and a small Go service
-consumes those events in real time.
 
 ```
 INSERT / UPDATE / DELETE on users
@@ -21,17 +22,16 @@ INSERT / UPDATE / DELETE on users
 
 ## How it works
 
-**Table.** `migrations/001_create_users.sql` creates a normal `users` table.
-
-**Trigger.** `migrations/002_create_users_notify_trigger.sql` installs an
-`AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` trigger. For each changed
-row it calls:
+`migrations/001_create_users.sql` creates the `users` table.
+`migrations/002_create_users_notify_trigger.sql` adds an
+`AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` trigger that publishes one
+JSON payload per changed row:
 
 ```sql
 PERFORM pg_notify('users_changes', payload::text);
 ```
 
-The payload looks like:
+Payload:
 
 ```json
 {
@@ -44,9 +44,8 @@ The payload looks like:
 }
 ```
 
-**Listener.** `cmd/listener` uses a dedicated `pgx.Conn` (not a pool, since
-`LISTEN` is connection-scoped), subscribes to the channel, and blocks in
-`WaitForNotification`, logging each decoded event.
+The listener holds a dedicated `pgx.Conn` because `LISTEN` is
+connection-scoped, and blocks in `WaitForNotification`, logging each event.
 
 ## Requirements
 
@@ -66,17 +65,17 @@ Then, in two terminals:
 
 ```bash
 make run-listener
-make run-writer     # inserts a random user every two seconds
+make run-writer   # insert a random user every two seconds
 ```
 
-When a row changes, the listener logs an event such as:
+The listener logs events as they arrive:
 
 ```
 INF listening for changes channel=users_changes
 INF change received action=INSERT id=1 row={"email":"ada@example.com","id":1,...} table=users
 ```
 
-Use the writer for one-off changes:
+For one-off changes:
 
 ```bash
 make run-writer ARGS='create -name "Ada" -email ada@example.com'
@@ -91,18 +90,13 @@ make run-writer ARGS='delete -id 1'
 | `DATABASE_URL` | `postgres://cdc:cdc@localhost:5433/cdc?sslmode=disable` |
 | `CDC_CHANNEL` | `users_changes` |
 
-Both are read from the environment. A local `.env` file is also loaded if
-present.
-
-## Commands
-
-Run `make` or `make help` to list all targets, including migrations, Docker
-and reset commands.
+Both are read from the environment; a local `.env` file is loaded if present.
+Run `make help` for the full list of targets.
 
 ## Migrations
 
-Migrations follow tern's `NNN_description.sql` convention. Each file contains
-the up statements, a separator, and the down statements:
+Migrations follow tern's `NNN_description.sql` convention and contain both
+directions:
 
 ```sql
 CREATE TABLE widgets (...);
@@ -112,50 +106,32 @@ CREATE TABLE widgets (...);
 DROP TABLE widgets;
 ```
 
-Applied versions are stored in `public.schema_version`. Use `make
-migrate-create`, `make migrate-up`, `make migrate-down` and `make
-migrate-status`.
+Applied versions are recorded in `public.schema_version`. Use
+`make migrate-create`, `make migrate-up`, `make migrate-down` and
+`make migrate-status`.
 
-## Limitations of LISTEN/NOTIFY
+## Limitations
 
-Trigger-based CDC keeps the setup simple, but it has significant limits:
+`LISTEN/NOTIFY` is simple, but delivery is not guaranteed:
 
-- **At-most-once delivery.** Notifications reach only sessions that are
-  already listening. Events published while the listener is offline are lost.
-- **No history.** There is no record of past changes to replay.
-- **Payload size.** Notifications must fit in roughly 8000 bytes. For wide
-  rows, publish only the `id` and fetch the row in the listener.
-- **Commit visibility.** Notifications are delivered when the transaction
-  commits, so rolled-back changes are never published.
+- **At-most-once.** Only sessions already listening receive an event. Changes
+  published while the listener is offline are lost.
+- **No history.** There is no log of past changes to replay.
+- **Payload size.** Notifications must fit in roughly 8000 bytes. Wide rows
+  should publish only the `id` and let the listener fetch the row.
+- **Commit visibility.** Events are published when the transaction commits;
+  rolled-back changes are never delivered.
 
-For guaranteed delivery, use an outbox/audit table or WAL-based replication.
-
-## Project layout
-
-```
-.
-├── cmd/
-│   ├── listener/        # LISTEN + WaitForNotification loop
-│   └── writer/          # inserts, updates and deletes users
-├── internal/
-│   ├── cdc/             # JSON event type
-│   ├── config/          # environment configuration
-│   ├── db/              # pgxpool setup
-│   ├── logging/         # zerolog logger
-│   └── store/           # users queries
-├── migrations/          # tern migrations
-├── docker-compose.yml
-└── Makefile
-```
+For guaranteed delivery, use an outbox table or WAL-based replication.
 
 ## Troubleshooting
 
 **The listener prints nothing.** Confirm migrations were applied
-(`make migrate-status`), that both processes use the same `DATABASE_URL`, and
-that `CDC_CHANNEL` matches the channel used by the trigger.
+(`make migrate-status`), both processes use the same `DATABASE_URL`, and
+`CDC_CHANNEL` matches the channel in the trigger.
 
-**Docker connection errors.** Make sure Docker is running. If you have more
-than one context, select the right one with `docker context use default`.
+**Docker connection errors.** Ensure Docker is running and, if you have
+multiple contexts, select one with `docker context use default`.
 
 **Port already in use.** Change `5433:5432` in `docker-compose.yml` and update
 `DATABASE_URL`.
