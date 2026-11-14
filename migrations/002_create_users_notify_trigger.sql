@@ -42,7 +42,7 @@ BEGIN
         payload := payload || jsonb_build_object('old', old_data);
     END IF;
 
-    PERFORM pg_notify('users_changes', payload::text);
+    PERFORM pg_notify('users_changes', payload::text); -- send the notification on the `users_changes` channel
 
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
