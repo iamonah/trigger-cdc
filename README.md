@@ -93,23 +93,6 @@ make run-writer ARGS='delete -id 1'
 Both are read from the environment; a local `.env` file is loaded if present.
 Run `make help` for the full list of targets.
 
-## Migrations
-
-Migrations follow tern's `NNN_description.sql` convention and contain both
-directions:
-
-```sql
-CREATE TABLE widgets (...);
-
----- create above / drop below ----
-
-DROP TABLE widgets;
-```
-
-Applied versions are recorded in `public.schema_version`. Use
-`make migrate-create`, `make migrate-up`, `make migrate-down` and
-`make migrate-status`.
-
 ## Limitations
 
 `LISTEN/NOTIFY` is simple, but delivery is not guaranteed:
@@ -130,8 +113,7 @@ For guaranteed delivery, use an outbox table or WAL-based replication.
 (`make migrate-status`), both processes use the same `DATABASE_URL`, and
 `CDC_CHANNEL` matches the channel in the trigger.
 
-**Docker connection errors.** Ensure Docker is running and, if you have
-multiple contexts, select one with `docker context use default`.
+**Docker connection errors.** Ensure Docker is running.
 
 **Port already in use.** Change `5433:5432` in `docker-compose.yml` and update
 `DATABASE_URL`.
