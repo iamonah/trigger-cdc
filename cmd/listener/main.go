@@ -63,11 +63,7 @@ func run(ctx context.Context, log zerolog.Logger, cfg config.Config) error {
 			return fmt.Errorf("giving up after %d attempts: %w", failures, err)
 		}
 
-		log.Warn().
-			Err(err).
-			Int("attempt", failures).
-			Dur("retry_in", reconnectDelay).
-			Msg("listener disconnected, retrying")
+		log.Warn().Err(err).Int("attempt", failures).Dur("retry_in", reconnectDelay).Msg("listener disconnected, retrying")
 
 		select {
 		case <-ctx.Done():
